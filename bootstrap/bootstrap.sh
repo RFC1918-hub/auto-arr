@@ -176,3 +176,129 @@ ensure "Prowlarr application Radarr" \
   prowlarr_has_app Radarr -- prowlarr_add_app Radarr "$RADARR" "$RADARR_API_KEY"
 ensure "Prowlarr application Sonarr" \
   prowlarr_has_app Sonarr -- prowlarr_add_app Sonarr "$SONARR" "$SONARR_API_KEY"
+
+# ---------------------------------------------------------------- Jellyfin
+log "=== Jellyfin ==="
+wait_for jellyfin "$JF/health"
+
+JF_AUTH='Authorization: MediaBrowser Client="auto-arr", Device="bootstrap", DeviceId="auto-arr-bootstrap", Version="1.0"'
+
+jf_wizard_done() {
+  curl -fsS "$JF/System/Info/Public" | jq -e '.StartupWizardCompleted == true'
+}
+
+if jf_wizard_done >/dev/null 2>&1; then
+  log "startup wizard — already completed, skipping"
+else
+  curl -fsS -X POST "$JF/Startup/Configuration" -H "$JF_AUTH" \
+    -H 'Content-Type: application/json' \
+    -d '{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}'
+  # GET before POST is required by the wizard flow
+  curl -fsS "$JF/Startup/User" -H "$JF_AUTH" >/dev/null
+  curl -fsS -X POST "$JF/Startup/User" -H "$JF_AUTH" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+          '{Name: $u, Password: $p}')"
+  curl -fsS -X POST "$JF/Startup/RemoteAccess" -H "$JF_AUTH" \
+    -H 'Content-Type: application/json' \
+    -d '{"EnableRemoteAccess":true,"EnableAutomaticPortMapping":false}'
+  curl -fsS -X POST "$JF/Startup/Complete" -H "$JF_AUTH"
+  log "startup wizard — completed"
+fi
+
+JF_TOKEN=$(curl -fsS -X POST "$JF/Users/AuthenticateByName" \
+  -H "$JF_AUTH" -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+        '{Username: $u, Pw: $p}')" | jq -r '.AccessToken')
+[[ -n "$JF_TOKEN" && "$JF_TOKEN" != null ]] || fail "could not authenticate to Jellyfin as ${JELLYFIN_ADMIN_USER}"
+
+jf_has_library() {
+  curl -fsS -H "X-Emby-Token: $JF_TOKEN" "$JF/Library/VirtualFolders" \
+    | jq -e --arg n "$1" '.[] | select(.Name == $n)'
+}
+# jf_add_library <name> <collectionType> <url-encoded-path>
+jf_add_library() {
+  curl -fsS -X POST -H "X-Emby-Token: $JF_TOKEN" -H 'Content-Type: application/json' \
+    -d '{"LibraryOptions":{"EnableRealtimeMonitor":true}}' \
+    "$JF/Library/VirtualFolders?name=$1&collectionType=$2&paths=$3&refreshLibrary=true"
+}
+ensure "Jellyfin library Movies" \
+  jf_has_library Movies -- jf_add_library Movies movies  %2Fdata%2Fmedia%2Fmovies
+ensure "Jellyfin library Shows" \
+  jf_has_library Shows  -- jf_add_library Shows  tvshows %2Fdata%2Fmedia%2Ftv
+
+curl -fsS -X POST -H "X-Emby-Token: $JF_TOKEN" "$JF/Library/Refresh"
+log "library scan triggered"
+
+# ---------------------------------------------------------------- Jellyseerr
+log "=== Jellyseerr ==="
+wait_for jellyseerr "$JS/api/v1/status"
+
+JS_COOKIES=/tmp/jellyseerr.cookies
+js_initialized() {
+  curl -fsS "$JS/api/v1/settings/public" | jq -e '.initialized == true'
+}
+js_login() {
+  curl -fsS -c "$JS_COOKIES" -X POST "$JS/api/v1/auth/jellyfin" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+          '{username: $u, password: $p, hostname: "jellyfin", port: 8096,
+            useSsl: false, urlBase: "", email: "admin@auto-arr.local"}')"
+}
+js_api() { # <METHOD> <path> [json-body]
+  local method=$1 path=$2 body=${3:-}
+  curl -fsS -b "$JS_COOKIES" -X "$method" -H 'Content-Type: application/json' \
+    ${body:+--data "$body"} "${JS}${path}"
+}
+
+js_login >/dev/null
+log "authenticated to Jellyseerr via Jellyfin account"
+
+# enable all synced Jellyfin libraries
+LIB_IDS=$(js_api GET "/api/v1/settings/jellyfin/library?sync=true" | jq -r 'map(.id) | join(",")')
+[[ -n "$LIB_IDS" ]] && js_api GET "/api/v1/settings/jellyfin/library?enable=${LIB_IDS}" >/dev/null
+log "Jellyseerr libraries enabled: ${LIB_IDS:-none}"
+
+js_has_radarr() { js_api GET /api/v1/settings/radarr | jq -e 'length > 0'; }
+js_add_radarr() {
+  local profile_id profile_name
+  profile_id=$(arr_api "$RADARR" "$RADARR_API_KEY" GET /api/v3/qualityprofile | jq '.[0].id')
+  profile_name=$(arr_api "$RADARR" "$RADARR_API_KEY" GET /api/v3/qualityprofile | jq -r '.[0].name')
+  js_api POST /api/v1/settings/radarr "$(jq -n \
+    --arg key "$RADARR_API_KEY" --argjson pid "$profile_id" --arg pname "$profile_name" \
+    '{name: "Radarr", hostname: "radarr", port: 7878, apiKey: $key, useSsl: false,
+      baseUrl: "", activeProfileId: $pid, activeProfileName: $pname,
+      activeDirectory: "/data/media/movies", is4k: false, isDefault: true,
+      minimumAvailability: "released", syncEnabled: true, preventSearch: false,
+      tags: []}')"
+}
+ensure "Jellyseerr Radarr server" js_has_radarr -- js_add_radarr
+
+js_has_sonarr() { js_api GET /api/v1/settings/sonarr | jq -e 'length > 0'; }
+js_add_sonarr() {
+  local profile_id profile_name
+  profile_id=$(arr_api "$SONARR" "$SONARR_API_KEY" GET /api/v3/qualityprofile | jq '.[0].id')
+  profile_name=$(arr_api "$SONARR" "$SONARR_API_KEY" GET /api/v3/qualityprofile | jq -r '.[0].name')
+  js_api POST /api/v1/settings/sonarr "$(jq -n \
+    --arg key "$SONARR_API_KEY" --argjson pid "$profile_id" --arg pname "$profile_name" \
+    '{name: "Sonarr", hostname: "sonarr", port: 8989, apiKey: $key, useSsl: false,
+      baseUrl: "", activeProfileId: $pid, activeProfileName: $pname,
+      activeDirectory: "/data/media/tv", activeAnimeDirectory: "",
+      is4k: false, isDefault: true, syncEnabled: true, preventSearch: false,
+      enableSeasonFolders: true, tags: [], animeTags: []}')"
+}
+ensure "Jellyseerr Sonarr server" js_has_sonarr -- js_add_sonarr
+
+if ! js_initialized >/dev/null 2>&1; then
+  js_api POST /api/v1/settings/initialize >/dev/null
+  log "Jellyseerr marked initialized"
+fi
+
+# ---------------------------------------------------------------- summary
+log "=== all services wired ==="
+log "qBittorrent: password set, categories movies/tv"
+log "Radarr/Sonarr: root folders + qBittorrent download client"
+log "Prowlarr: Radarr + Sonarr applications (full sync)"
+log "Jellyfin: admin user, Movies + Shows libraries, scan triggered"
+log "Jellyseerr: connected to Jellyfin, Radarr and Sonarr"
+exit 0
