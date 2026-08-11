@@ -36,8 +36,10 @@ else
   say "Existing .env found — keeping it (delete .env to regenerate)"
 fi
 
-# shellcheck disable=SC1091  # generated above
-set -a; source .env; set +a
+set -a
+# shellcheck disable=SC1091  # .env is generated above, not available to the linter
+source .env
+set +a
 
 # ---------- credentials file ----------
 {
