@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs INSIDE the one-shot bootstrap container. Wires all services together.
 # Every step is idempotent: check current state, only create what's missing.
+# shellcheck disable=SC2329  # check/create helpers are invoked indirectly via ensure()
 set -euo pipefail
 
 QB=http://qbittorrent:8080
@@ -239,11 +240,21 @@ js_initialized() {
   curl -fsS "$JS/api/v1/settings/public" | jq -e '.initialized == true'
 }
 js_login() {
+  # Once an admin exists, a plain login works (sending hostname again is a 500).
+  if curl -fsS -c "$JS_COOKIES" -X POST "$JS/api/v1/auth/jellyfin" \
+       -H 'Content-Type: application/json' \
+       -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+             '{username: $u, password: $p}')" >/dev/null 2>&1; then
+    return 0
+  fi
+  # First run: full setup body — connects Jellyfin and creates the admin user.
+  # serverType 2 = MediaServerType.JELLYFIN (required since Jellyseerr 2.x).
   curl -fsS -c "$JS_COOKIES" -X POST "$JS/api/v1/auth/jellyfin" \
     -H 'Content-Type: application/json' \
     -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
           '{username: $u, password: $p, hostname: "jellyfin", port: 8096,
-            useSsl: false, urlBase: "", email: "admin@auto-arr.local"}')"
+            useSsl: false, urlBase: "", email: "admin@auto-arr.local",
+            serverType: 2}')"
 }
 js_api() { # <METHOD> <path> [json-body]
   local method=$1 path=$2 body=${3:-}
