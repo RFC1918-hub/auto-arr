@@ -1,0 +1,123 @@
+name: auto-arr
+
+networks:
+  arr:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+x-common-env: &common-env
+  PUID: ${PUID}
+  PGID: ${PGID}
+  TZ: ${TZ}
+
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      <<: *common-env
+      WEBUI_PORT: "8080"
+    volumes:
+      - ${CONFIG_ROOT}/qbittorrent:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "${QBIT_PORT}:8080"
+    networks: [arr]
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      <<: *common-env
+      PROWLARR__AUTH__APIKEY: ${PROWLARR_API_KEY}
+      PROWLARR__AUTH__METHOD: Forms
+    volumes:
+      - ${CONFIG_ROOT}/prowlarr:/config
+    ports:
+      - "${PROWLARR_PORT}:9696"
+    networks: [arr]
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      <<: *common-env
+      RADARR__AUTH__APIKEY: ${RADARR_API_KEY}
+      RADARR__AUTH__METHOD: Forms
+    volumes:
+      - ${CONFIG_ROOT}/radarr:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "${RADARR_PORT}:7878"
+    networks: [arr]
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      <<: *common-env
+      SONARR__AUTH__APIKEY: ${SONARR_API_KEY}
+      SONARR__AUTH__METHOD: Forms
+    volumes:
+      - ${CONFIG_ROOT}/sonarr:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "${SONARR_PORT}:8989"
+    networks: [arr]
+    restart: unless-stopped
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      <<: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/jellyfin:/config
+      - ${DATA_ROOT}/media:/data/media
+    ports:
+      - "${JELLYFIN_PORT}:8096"
+    networks: [arr]
+    restart: unless-stopped
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/jellyseerr:/app/config
+    ports:
+      - "${JELLYSEERR_PORT}:5055"
+    networks: [arr]
+    restart: unless-stopped
+
+  bootstrap:
+    image: alpine:3.20
+    container_name: arr-bootstrap
+    depends_on:
+      - qbittorrent
+      - prowlarr
+      - radarr
+      - sonarr
+      - jellyfin
+      - jellyseerr
+    environment:
+      RADARR_API_KEY: ${RADARR_API_KEY}
+      SONARR_API_KEY: ${SONARR_API_KEY}
+      PROWLARR_API_KEY: ${PROWLARR_API_KEY}
+      ARR_ADMIN_USER: ${ARR_ADMIN_USER}
+      ARR_ADMIN_PASSWORD: ${ARR_ADMIN_PASSWORD}
+      QBIT_USER: ${QBIT_USER}
+      QBIT_PASSWORD: ${QBIT_PASSWORD}
+      JELLYFIN_ADMIN_USER: ${JELLYFIN_ADMIN_USER}
+      JELLYFIN_ADMIN_PASSWORD: ${JELLYFIN_ADMIN_PASSWORD}
+    volumes:
+      - ./bootstrap:/bootstrap:ro
+    networks: [arr]
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache bash curl jq >/dev/null && exec bash /bootstrap/bootstrap.sh"]
