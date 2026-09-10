@@ -180,7 +180,18 @@ ensure "Prowlarr application Sonarr" \
 
 # ---------------------------------------------------------------- Jellyfin
 log "=== Jellyfin ==="
-wait_for jellyfin "$JF/health"
+# Jellyfin 12+ serves a startup/migration placeholder that answers /health (and
+# some GETs) with 200 while the real API still returns 503 HTML. Wait until
+# /System/Info/Public returns actual JSON, which only the real server does.
+jf_ready() { curl -fsS --max-time 5 "$JF/System/Info/Public" 2>/dev/null | jq -e '.Version' >/dev/null 2>&1; }
+jf_start=$(date +%s)
+until jf_ready; do
+  if (( $(date +%s) - jf_start > 300 )); then
+    fail "jellyfin did not become ready after 300s — check: docker logs jellyfin"
+  fi
+  sleep 3
+done
+log "jellyfin is up"
 
 JF_AUTH='Authorization: MediaBrowser Client="auto-arr", Device="bootstrap", DeviceId="auto-arr-bootstrap", Version="1.0"'
 
@@ -207,19 +218,31 @@ else
   log "startup wizard — completed"
 fi
 
-JF_TOKEN=$(curl -fsS -X POST "$JF/Users/AuthenticateByName" \
-  -H "$JF_AUTH" -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
-        '{Username: $u, Pw: $p}')" | jq -r '.AccessToken')
-[[ -n "$JF_TOKEN" && "$JF_TOKEN" != null ]] || fail "could not authenticate to Jellyfin as ${JELLYFIN_ADMIN_USER}"
+# Jellyfin 12 can briefly refuse/deny requests while it settles right after
+# Startup/Complete (port rebind + post-wizard reconfiguration), so retry.
+JF_TOKEN=""
+for _ in {1..20}; do
+  JF_TOKEN=$(curl -fsS -X POST "$JF/Users/AuthenticateByName" \
+    -H "$JF_AUTH" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg u "$JELLYFIN_ADMIN_USER" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+          '{Username: $u, Pw: $p}')" 2>/dev/null | jq -r '.AccessToken // empty' || true)
+  [[ -n "$JF_TOKEN" ]] && break
+  sleep 3
+done
+[[ -n "$JF_TOKEN" ]] || fail "could not authenticate to Jellyfin as ${JELLYFIN_ADMIN_USER} — if this is Jellyfin 12+, check EnableLegacyAuthorization in config/jellyfin/system.xml"
+
+# Jellyfin 12 ships fresh installs with EnableLegacyAuthorization=false, which
+# rejects the X-Emby-Token header (401). Present the token in the supported
+# 'Authorization: MediaBrowser ..., Token=' form (works on 10.x too).
+JF_TOK_AUTH="Authorization: MediaBrowser Client=\"auto-arr\", Device=\"bootstrap\", DeviceId=\"auto-arr-bootstrap\", Version=\"1.0\", Token=\"$JF_TOKEN\""
 
 jf_has_library() {
-  curl -fsS -H "X-Emby-Token: $JF_TOKEN" "$JF/Library/VirtualFolders" \
+  curl -fsS -H "$JF_TOK_AUTH" "$JF/Library/VirtualFolders" \
     | jq -e --arg n "$1" '.[] | select(.Name == $n)'
 }
 # jf_add_library <name> <collectionType> <url-encoded-path>
 jf_add_library() {
-  curl -fsS -X POST -H "X-Emby-Token: $JF_TOKEN" -H 'Content-Type: application/json' \
+  curl -fsS -X POST -H "$JF_TOK_AUTH" -H 'Content-Type: application/json' \
     -d '{"LibraryOptions":{"EnableRealtimeMonitor":true}}' \
     "$JF/Library/VirtualFolders?name=$1&collectionType=$2&paths=$3&refreshLibrary=true"
 }
@@ -228,7 +251,7 @@ ensure "Jellyfin library Movies" \
 ensure "Jellyfin library Shows" \
   jf_has_library Shows  -- jf_add_library Shows  tvshows %2Fdata%2Fmedia%2Ftv
 
-curl -fsS -X POST -H "X-Emby-Token: $JF_TOKEN" "$JF/Library/Refresh"
+curl -fsS -X POST -H "$JF_TOK_AUTH" "$JF/Library/Refresh"
 log "library scan triggered"
 
 # ---------------------------------------------------------------- Jellyseerr
