@@ -1,8 +1,8 @@
 # auto-arr
 
 One command installs and wires a complete media-automation stack on any Linux
-server with Docker: **Prowlarr, Radarr, Sonarr, Jellyseerr, Jellyfin and
-qBittorrent** — APIs connected, folders created, libraries scanned.
+server with Docker: **Prowlarr, Radarr, Sonarr, Seerr (formerly Jellyseerr),
+Jellyfin and qBittorrent** — APIs connected, folders created, libraries scanned.
 
 ## Quick start
 

@@ -85,8 +85,13 @@ services:
     restart: unless-stopped
 
   jellyseerr:
-    image: fallenbagel/jellyseerr:latest
+    # Jellyseerr was renamed Seerr. fallenbagel/jellyseerr:latest is frozen at
+    # 2.7.3 (Aug 2025), which still talks to Jellyfin with the legacy
+    # X-Emby-Authorization header that Jellyfin 12 rejects by default.
+    image: seerr/seerr:latest
     container_name: jellyseerr
+    init: true               # the Seerr image ships no init process
+    user: "${PUID}:${PGID}"  # image defaults to UID 1000; match the stack so /app/config is writable
     environment:
       TZ: ${TZ}
     volumes:
