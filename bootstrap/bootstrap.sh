@@ -10,6 +10,7 @@ RADARR=http://radarr:7878
 SONARR=http://sonarr:8989
 JF=http://jellyfin:8096
 JS=http://jellyseerr:5055
+FLARESOLVERR=http://flaresolverr:8191
 
 log()  { printf '>> %s\n' "$*"; }
 fail() { printf '!! ERROR: %s\n' "$*" >&2; exit 1; }
@@ -178,6 +179,45 @@ ensure "Prowlarr application Radarr" \
 ensure "Prowlarr application Sonarr" \
   prowlarr_has_app Sonarr -- prowlarr_add_app Sonarr "$SONARR" "$SONARR_API_KEY"
 
+# ---------------------------------------------------------------- FlareSolverr
+# Prowlarr routes an indexer through an indexer proxy only when the two share a
+# tag, so create the 'flaresolverr' tag and attach it to the proxy. Users add
+# that tag to Cloudflare-protected indexers (e.g. 1337x) when adding them.
+wait_for flaresolverr "$FLARESOLVERR/"
+
+# prowlarr_tag_id <label> — prints the tag's id, creating the tag if needed
+prowlarr_tag_id() {
+  local id
+  id=$(arr_api "$PROWLARR" "$PROWLARR_API_KEY" GET /api/v1/tag \
+    | jq -r --arg l "$1" '.[] | select(.label == $l) | .id')
+  if [[ -z "$id" ]]; then
+    id=$(arr_api "$PROWLARR" "$PROWLARR_API_KEY" POST /api/v1/tag \
+      "$(jq -n --arg l "$1" '{label: $l}')" | jq -r '.id')
+  fi
+  echo "$id"
+}
+prowlarr_has_proxy() {
+  arr_api "$PROWLARR" "$PROWLARR_API_KEY" GET /api/v1/indexerproxy \
+    | jq -e '.[] | select(.name == "FlareSolverr")'
+}
+prowlarr_add_proxy() {
+  local tag
+  tag=$(prowlarr_tag_id flaresolverr)
+  arr_api "$PROWLARR" "$PROWLARR_API_KEY" POST /api/v1/indexerproxy "$(jq -n \
+    --argjson tag "$tag" --arg host "$FLARESOLVERR/" \
+    '{
+      name: "FlareSolverr", implementation: "FlareSolverr",
+      implementationName: "FlareSolverr", configContract: "FlareSolverrSettings",
+      fields: [
+        {name: "host", value: $host},
+        {name: "requestTimeout", value: 60}
+      ],
+      tags: [$tag]
+    }')"
+}
+ensure "Prowlarr indexer proxy FlareSolverr (tag 'flaresolverr')" \
+  prowlarr_has_proxy -- prowlarr_add_proxy
+
 # ---------------------------------------------------------------- Jellyfin
 log "=== Jellyfin ==="
 # Jellyfin 12+ serves a startup/migration placeholder that answers /health (and
@@ -332,7 +372,7 @@ fi
 log "=== all services wired ==="
 log "qBittorrent: password set, categories movies/tv"
 log "Radarr/Sonarr: root folders + qBittorrent download client"
-log "Prowlarr: Radarr + Sonarr applications (full sync)"
+log "Prowlarr: Radarr + Sonarr applications (full sync), FlareSolverr proxy for indexers tagged 'flaresolverr'"
 log "Jellyfin: admin user, Movies + Shows libraries, scan triggered"
 log "Jellyseerr: connected to Jellyfin, Radarr and Sonarr"
 exit 0

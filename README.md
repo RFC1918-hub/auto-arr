@@ -1,8 +1,9 @@
 # auto-arr
 
 One command installs and wires a complete media-automation stack on any Linux
-server with Docker: **Prowlarr, Radarr, Sonarr, Seerr (formerly Jellyseerr),
-Jellyfin and qBittorrent** — APIs connected, folders created, libraries scanned.
+server with Docker: **Prowlarr (+ FlareSolverr), Radarr, Sonarr, Seerr (formerly
+Jellyseerr), Jellyfin and qBittorrent** — APIs connected, folders created,
+libraries scanned.
 
 ## Quick start
 
@@ -20,6 +21,8 @@ Logins are in `credentials.txt` (git-ignored, generated on first run).
 
 - Prowlarr → Radarr + Sonarr (full sync — add an indexer in Prowlarr and it
   appears in both automatically)
+- Prowlarr → FlareSolverr indexer proxy, attached to the tag `flaresolverr`,
+  for indexers behind Cloudflare protection
 - Radarr/Sonarr → qBittorrent (categories `movies`/`tv`) + root folders
 - Jellyfin → admin user created, Movies + Shows libraries added and scanned
 - Jellyseerr → connected to Jellyfin, Radarr and Sonarr
@@ -36,7 +39,9 @@ config/<app>/              # each app's config
 
 ## After install
 
-1. Open Prowlarr and add your indexers — that's the only manual step.
+1. Open Prowlarr and add your indexers — that's the only manual step. If one
+   fails with *blocked by CloudFlare Protection* (1337x, for example), add the
+   `flaresolverr` tag to that indexer so Prowlarr routes it through FlareSolverr.
 2. Request something in Jellyseerr and watch it flow through.
 
 ## Operations

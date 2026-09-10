@@ -101,6 +101,18 @@ services:
     networks: [arr]
     restart: unless-stopped
 
+  flaresolverr:
+    # Solves Cloudflare challenges for Prowlarr indexers that otherwise fail
+    # with "blocked by CloudFlare Protection" (e.g. 1337x). Internal only:
+    # Prowlarr reaches it on the compose network, and only routes indexers
+    # tagged 'flaresolverr' through it (see README).
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      TZ: ${TZ}
+    networks: [arr]
+    restart: unless-stopped
+
   bootstrap:
     image: alpine:3.20
     container_name: arr-bootstrap
@@ -111,6 +123,7 @@ services:
       - sonarr
       - jellyfin
       - jellyseerr
+      - flaresolverr
     environment:
       RADARR_API_KEY: ${RADARR_API_KEY}
       SONARR_API_KEY: ${SONARR_API_KEY}
