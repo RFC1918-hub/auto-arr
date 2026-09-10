@@ -64,6 +64,15 @@ curl -fsS -X POST "$QB/api/v2/app/setPreferences" \
   >/dev/null
 log "qBittorrent WebUI credentials set"
 
+# Download paths: keep downloads under /data/torrents and use Automatic Torrent
+# Management so each category's save path (/data/torrents/<category>) applies.
+# In the default Manual mode qBittorrent ignores category paths and saves to its
+# private /config/Downloads, which Radarr/Sonarr cannot see, so nothing imports.
+curl -fsS -X POST "$QB/api/v2/app/setPreferences" \
+  --data-urlencode 'json={"save_path":"/data/torrents","auto_tmm_enabled":true,"torrent_changed_tmm_enabled":true,"save_path_changed_tmm_enabled":true,"category_changed_tmm_enabled":true}' \
+  >/dev/null
+log "qBittorrent save path /data/torrents, automatic torrent management on"
+
 # Seeding cleanup: pause a torrent once either share limit is reached (0 = no
 # limit). Radarr/Sonarr then remove paused-complete torrents with their files
 # once imported (see arr_set_remove_completed). Pausing instead of deleting here
@@ -90,6 +99,19 @@ ensure "qBittorrent category 'movies'" \
   qb_has_category movies -- qb_add_category movies /data/torrents/movies
 ensure "qBittorrent category 'tv'" \
   qb_has_category tv     -- qb_add_category tv     /data/torrents/tv
+
+# Torrents added while management was Manual sit in /config/Downloads. Switching
+# them to Automatic makes qBittorrent relocate them into their category path, after
+# which the apps' pending imports complete on their next check.
+qb_manual=$(curl -fsS "$QB/api/v2/torrents/info" \
+  | jq -c '[.[] | select((.category == "movies" or .category == "tv") and .auto_tmm == false) | .hash]')
+if [[ "$qb_manual" != "[]" ]]; then
+  curl -fsS -X POST "$QB/api/v2/torrents/setAutoManagement" \
+    --data-urlencode "hashes=$(jq -r 'join("|")' <<<"$qb_manual")" --data-urlencode "enable=true" >/dev/null
+  log "qBittorrent: $(jq length <<<"$qb_manual") existing torrent(s) switched to automatic management — relocating to /data/torrents/<category>"
+else
+  log "qBittorrent torrents — all under automatic management, skipping"
+fi
 
 # ------------------------------------------------------------- arr common
 # arr_set_auth <base> <key> <api-ver>  — set forms login on first run
@@ -405,7 +427,7 @@ fi
 
 # ---------------------------------------------------------------- summary
 log "=== all services wired ==="
-log "qBittorrent: password set, categories movies/tv, seeding limits ratio ${SEED_RATIO} / ${SEED_TIME_MINUTES} min"
+log "qBittorrent: password set, downloads under /data/torrents, categories movies/tv, seeding limits ratio ${SEED_RATIO} / ${SEED_TIME_MINUTES} min"
 log "Radarr/Sonarr: root folders + qBittorrent download client (finished torrents removed after import)"
 log "Prowlarr: Radarr + Sonarr applications (full sync), FlareSolverr proxy for indexers tagged 'flaresolverr'"
 log "Jellyfin: admin user, Movies + Shows libraries, scan triggered"
