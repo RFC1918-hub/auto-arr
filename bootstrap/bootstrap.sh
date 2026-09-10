@@ -64,6 +64,21 @@ curl -fsS -X POST "$QB/api/v2/app/setPreferences" \
   >/dev/null
 log "qBittorrent WebUI credentials set"
 
+# Seeding cleanup: pause a torrent once either share limit is reached (0 = no
+# limit). Radarr/Sonarr then remove paused-complete torrents with their files
+# once imported (see arr_set_remove_completed). Pausing instead of deleting here
+# guarantees the files still exist when the app imports them; library files are
+# hardlinks, so they are never affected.
+SEED_RATIO=${SEED_RATIO:-1.0}
+SEED_TIME_MINUTES=${SEED_TIME_MINUTES:-1440}
+curl -fsS -X POST "$QB/api/v2/app/setPreferences" \
+  --data-urlencode "json=$(jq -n --argjson r "$SEED_RATIO" --argjson t "$SEED_TIME_MINUTES" '
+    {max_ratio_act: 0}
+    + (if $r > 0 then {max_ratio_enabled: true, max_ratio: $r} else {max_ratio_enabled: false} end)
+    + (if $t > 0 then {max_seeding_time_enabled: true, max_seeding_time: $t} else {max_seeding_time_enabled: false} end)')" \
+  >/dev/null
+log "qBittorrent seeding limits: ratio ${SEED_RATIO}, ${SEED_TIME_MINUTES} min (0 = off) — pause when reached"
+
 qb_has_category() {
   curl -fsS "$QB/api/v2/torrents/categories" | jq -e --arg c "$1" 'has($c)'
 }
@@ -116,6 +131,7 @@ arr_add_downloadclient() {
     --arg user "$QBIT_USER" --arg pass "$QBIT_PASSWORD" \
     '{
       enable: true, protocol: "torrent", priority: 1,
+      removeCompletedDownloads: true, removeFailedDownloads: true,
       name: "qBittorrent", implementation: "QBittorrent",
       implementationName: "qBittorrent", configContract: "QBittorrentSettings",
       fields: [
@@ -129,6 +145,23 @@ arr_add_downloadclient() {
     }')"
 }
 
+# arr_set_remove_completed <base> <key> <api-ver> — make the app delete its
+# torrents (and their files) from qBittorrent once imported and done seeding.
+# Fixes installs whose client was created before this option was set.
+arr_set_remove_completed() {
+  local base=$1 key=$2 ver=$3 client
+  client=$(arr_api "$base" "$key" GET "/api/${ver}/downloadclient" \
+    | jq -c '.[] | select(.name == "qBittorrent")')
+  [[ -n "$client" ]] || fail "qBittorrent download client not found at ${base}"
+  if jq -e '.removeCompletedDownloads == true and .removeFailedDownloads == true' <<<"$client" >/dev/null; then
+    log "download client cleanup — already configured, skipping"
+    return 0
+  fi
+  arr_api "$base" "$key" PUT "/api/${ver}/downloadclient/$(jq -r '.id' <<<"$client")" \
+    "$(jq '.removeCompletedDownloads = true | .removeFailedDownloads = true' <<<"$client")" >/dev/null
+  log "download client cleanup — remove completed/failed downloads enabled"
+}
+
 # ---------------------------------------------------------------- Radarr
 log "=== Radarr ==="
 wait_for radarr "$RADARR/api/v3/system/status?apikey=${RADARR_API_KEY}"
@@ -139,6 +172,7 @@ ensure "Radarr root folder /data/media/movies" \
 ensure "Radarr download client qBittorrent" \
   arr_has_downloadclient "$RADARR" "$RADARR_API_KEY" v3 -- \
   arr_add_downloadclient "$RADARR" "$RADARR_API_KEY" v3 movieCategory movies
+arr_set_remove_completed "$RADARR" "$RADARR_API_KEY" v3
 
 # ---------------------------------------------------------------- Sonarr
 log "=== Sonarr ==="
@@ -150,6 +184,7 @@ ensure "Sonarr root folder /data/media/tv" \
 ensure "Sonarr download client qBittorrent" \
   arr_has_downloadclient "$SONARR" "$SONARR_API_KEY" v3 -- \
   arr_add_downloadclient "$SONARR" "$SONARR_API_KEY" v3 tvCategory tv
+arr_set_remove_completed "$SONARR" "$SONARR_API_KEY" v3
 
 # ---------------------------------------------------------------- Prowlarr
 log "=== Prowlarr ==="
@@ -370,8 +405,8 @@ fi
 
 # ---------------------------------------------------------------- summary
 log "=== all services wired ==="
-log "qBittorrent: password set, categories movies/tv"
-log "Radarr/Sonarr: root folders + qBittorrent download client"
+log "qBittorrent: password set, categories movies/tv, seeding limits ratio ${SEED_RATIO} / ${SEED_TIME_MINUTES} min"
+log "Radarr/Sonarr: root folders + qBittorrent download client (finished torrents removed after import)"
 log "Prowlarr: Radarr + Sonarr applications (full sync), FlareSolverr proxy for indexers tagged 'flaresolverr'"
 log "Jellyfin: admin user, Movies + Shows libraries, scan triggered"
 log "Jellyseerr: connected to Jellyfin, Radarr and Sonarr"

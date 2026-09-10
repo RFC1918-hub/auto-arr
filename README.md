@@ -24,6 +24,10 @@ Logins are in `credentials.txt` (git-ignored, generated on first run).
 - Prowlarr → FlareSolverr indexer proxy, attached to the tag `flaresolverr`,
   for indexers behind Cloudflare protection
 - Radarr/Sonarr → qBittorrent (categories `movies`/`tv`) + root folders
+- Seeding cleanup: qBittorrent pauses a torrent at ratio 1.0 or after 24 h
+  (whichever first; `SEED_RATIO` / `SEED_TIME_MINUTES` in `.env`), and
+  Radarr/Sonarr then delete it and its files once imported. Library copies are
+  hardlinks and are untouched.
 - Jellyfin → admin user created, Movies + Shows libraries added and scanned
 - Jellyseerr → connected to Jellyfin, Radarr and Sonarr
 - Folder layout follows the TRaSH-guides single-volume convention, so
@@ -49,5 +53,7 @@ config/<app>/              # each app's config
 - **Re-run safely:** `./setup.sh` is idempotent — it repairs/resumes, never duplicates.
 - **Regenerate secrets:** delete `.env` and `config/`, then re-run (full reset).
 - **Change ports/paths:** edit `.env`, then `docker compose up -d`.
+- **Change seeding limits:** edit `SEED_RATIO` / `SEED_TIME_MINUTES` in `.env`
+  (0 disables one), then re-run `./setup.sh`.
 - **Logs:** `docker logs <service>`; wiring log: `docker logs arr-bootstrap`.
 - **Uninstall:** `docker compose down` (add `-v` plus delete `config/` and `data/` for a full wipe).
