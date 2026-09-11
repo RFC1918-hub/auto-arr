@@ -29,6 +29,8 @@ Logins are in `credentials.txt` (git-ignored, generated on first run).
   Radarr/Sonarr then delete it and its files once imported. Library copies are
   hardlinks and are untouched.
 - Jellyfin → admin user created, Movies + Shows libraries added and scanned
+- Radarr/Sonarr → Jellyfin: the library is refreshed the moment something is
+  imported, upgraded, renamed or deleted (no waiting for a scheduled scan)
 - Jellyseerr → connected to Jellyfin, Radarr and Sonarr
 - Folder layout follows the TRaSH-guides single-volume convention, so
   completed downloads are **hardlinked** into the library (no copy, no

@@ -351,6 +351,55 @@ ensure "Jellyfin library Shows" \
 curl -fsS -X POST -H "$JF_TOK_AUTH" "$JF/Library/Refresh"
 log "library scan triggered"
 
+# API key the arr apps use to tell Jellyfin about imports (reused if present).
+jf_api_key() {
+  local key
+  key=$(curl -fsS -H "$JF_TOK_AUTH" "$JF/Auth/Keys" \
+    | jq -r '.Items[] | select(.AppName == "auto-arr") | .AccessToken' | head -n1)
+  if [[ -z "$key" ]]; then
+    curl -fsS -X POST -H "$JF_TOK_AUTH" "$JF/Auth/Keys?app=auto-arr" >/dev/null
+    key=$(curl -fsS -H "$JF_TOK_AUTH" "$JF/Auth/Keys" \
+      | jq -r '.Items[] | select(.AppName == "auto-arr") | .AccessToken' | head -n1)
+  fi
+  [[ -n "$key" ]] || fail "could not create a Jellyfin API key for the arr apps"
+  echo "$key"
+}
+JF_API_KEY=$(jf_api_key)
+log "Jellyfin API key for Radarr/Sonarr — ready"
+
+# ------------------------------------------- Radarr/Sonarr → Jellyfin refresh
+# Have each app tell Jellyfin to update its library the moment it imports,
+# upgrades, renames or deletes media. Jellyfin's real-time folder watching is
+# unreliable in Docker and its scheduled scan is hours apart, so without this
+# new media only appears after the next scan.
+arr_has_jellyfin_connect() {
+  arr_api "$1" "$2" GET "/api/$3/notification" | jq -e '.[] | select(.name == "Jellyfin")'
+}
+# arr_add_jellyfin_connect <base> <key> <api-ver> <event-flags-json>
+arr_add_jellyfin_connect() {
+  arr_api "$1" "$2" POST "/api/$3/notification" "$(arr_api "$1" "$2" GET "/api/$3/notification/schema" \
+    | jq --arg k "$JF_API_KEY" --argjson ev "$4" '
+      [.[] | select(.implementation == "MediaBrowser")][0]
+      | .name = "Jellyfin" | .tags = []
+      | .fields |= map(
+          if   .name == "host"          then .value = "jellyfin"
+          elif .name == "port"          then .value = 8096
+          elif .name == "useSsl"        then .value = false
+          elif .name == "apiKey"        then .value = $k
+          elif .name == "notify"        then .value = false
+          elif .name == "updateLibrary" then .value = true
+          else . end)
+      | . + $ev')"
+}
+RADARR_JF_EVENTS='{"onDownload":true,"onUpgrade":true,"onRename":true,"onMovieDelete":true,"onMovieFileDelete":true,"onMovieFileDeleteForUpgrade":true}'
+SONARR_JF_EVENTS='{"onDownload":true,"onUpgrade":true,"onImportComplete":true,"onRename":true,"onSeriesDelete":true,"onEpisodeFileDelete":true,"onEpisodeFileDeleteForUpgrade":true}'
+ensure "Radarr → Jellyfin library refresh on import" \
+  arr_has_jellyfin_connect "$RADARR" "$RADARR_API_KEY" v3 -- \
+  arr_add_jellyfin_connect "$RADARR" "$RADARR_API_KEY" v3 "$RADARR_JF_EVENTS"
+ensure "Sonarr → Jellyfin library refresh on import" \
+  arr_has_jellyfin_connect "$SONARR" "$SONARR_API_KEY" v3 -- \
+  arr_add_jellyfin_connect "$SONARR" "$SONARR_API_KEY" v3 "$SONARR_JF_EVENTS"
+
 # ---------------------------------------------------------------- Jellyseerr
 log "=== Jellyseerr ==="
 wait_for jellyseerr "$JS/api/v1/status"
@@ -430,6 +479,6 @@ log "=== all services wired ==="
 log "qBittorrent: password set, downloads under /data/torrents, categories movies/tv, seeding limits ratio ${SEED_RATIO} / ${SEED_TIME_MINUTES} min"
 log "Radarr/Sonarr: root folders + qBittorrent download client (finished torrents removed after import)"
 log "Prowlarr: Radarr + Sonarr applications (full sync), FlareSolverr proxy for indexers tagged 'flaresolverr'"
-log "Jellyfin: admin user, Movies + Shows libraries, scan triggered"
+log "Jellyfin: admin user, Movies + Shows libraries, scan triggered, refreshed by Radarr/Sonarr on import"
 log "Jellyseerr: connected to Jellyfin, Radarr and Sonarr"
 exit 0
