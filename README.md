@@ -32,7 +32,8 @@ with `sudo` as your normal user (not from a root shell) so media is owned by you
 - Jellyfin → admin user created, Movies + Shows libraries added and scanned
 - Radarr/Sonarr → Jellyfin: a webhook rescans the library the moment something
   is imported, upgraded, renamed or deleted (no waiting for a scheduled scan)
-- Jellyseerr → connected to Jellyfin, Radarr and Sonarr
+- Jellyseerr → connected to Jellyfin, Radarr and Sonarr; requests use the
+  `QUALITY_PROFILE` quality profile (HD-1080p by default)
 - Homepage → one dashboard linking every service, with live status (queues,
   downloads, now playing, pending requests, disk usage)
 - Logins: Radarr, Sonarr, Prowlarr and qBittorrent skip the password for

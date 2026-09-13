@@ -463,35 +463,52 @@ LIB_IDS=$(js_api GET "/api/v1/settings/jellyfin/library?sync=true" | jq -r 'map(
 [[ -n "$LIB_IDS" ]] && js_api GET "/api/v1/settings/jellyfin/library?enable=${LIB_IDS}" >/dev/null
 log "Jellyseerr libraries enabled: ${LIB_IDS:-none}"
 
+# Quality profile Jellyseerr requests with (by name, as listed in Radarr/Sonarr).
+# Falls back to the app's first profile when the name does not exist.
+QUALITY_PROFILE=${QUALITY_PROFILE:-HD-1080p}
+# arr_profile <base> <key> — {id, name} of the wanted quality profile
+arr_profile() {
+  arr_api "$1" "$2" GET /api/v3/qualityprofile \
+    | jq -c --arg n "$QUALITY_PROFILE" '([.[] | select(.name == $n)][0] // .[0]) | {id, name}'
+}
+# js_profile_ok <radarr|sonarr> <profile-id> / js_set_profile <radarr|sonarr> <profile-json>
+js_profile_ok() { js_api GET "/api/v1/settings/$1" | jq -e --argjson p "$2" '.[0].activeProfileId == $p'; }
+js_set_profile() {
+  local cur
+  cur=$(js_api GET "/api/v1/settings/$1" | jq -c '.[0]')
+  js_api PUT "/api/v1/settings/$1/$(jq -r '.id' <<<"$cur")" \
+    "$(jq --argjson p "$2" '.activeProfileId = $p.id | .activeProfileName = $p.name' <<<"$cur")"
+}
+
+RADARR_PROFILE=$(arr_profile "$RADARR" "$RADARR_API_KEY")
 js_has_radarr() { js_api GET /api/v1/settings/radarr | jq -e 'length > 0'; }
 js_add_radarr() {
-  local profile_id profile_name
-  profile_id=$(arr_api "$RADARR" "$RADARR_API_KEY" GET /api/v3/qualityprofile | jq '.[0].id')
-  profile_name=$(arr_api "$RADARR" "$RADARR_API_KEY" GET /api/v3/qualityprofile | jq -r '.[0].name')
   js_api POST /api/v1/settings/radarr "$(jq -n \
-    --arg key "$RADARR_API_KEY" --argjson pid "$profile_id" --arg pname "$profile_name" \
+    --arg key "$RADARR_API_KEY" --argjson p "$RADARR_PROFILE" \
     '{name: "Radarr", hostname: "radarr", port: 7878, apiKey: $key, useSsl: false,
-      baseUrl: "", activeProfileId: $pid, activeProfileName: $pname,
+      baseUrl: "", activeProfileId: $p.id, activeProfileName: $p.name,
       activeDirectory: "/data/media/movies", is4k: false, isDefault: true,
       minimumAvailability: "released", syncEnabled: true, preventSearch: false,
       tags: []}')"
 }
 ensure "Jellyseerr Radarr server" js_has_radarr -- js_add_radarr
+ensure "Jellyseerr Radarr quality profile '$(jq -r '.name' <<<"$RADARR_PROFILE")'" \
+  js_profile_ok radarr "$(jq '.id' <<<"$RADARR_PROFILE")" -- js_set_profile radarr "$RADARR_PROFILE"
 
+SONARR_PROFILE=$(arr_profile "$SONARR" "$SONARR_API_KEY")
 js_has_sonarr() { js_api GET /api/v1/settings/sonarr | jq -e 'length > 0'; }
 js_add_sonarr() {
-  local profile_id profile_name
-  profile_id=$(arr_api "$SONARR" "$SONARR_API_KEY" GET /api/v3/qualityprofile | jq '.[0].id')
-  profile_name=$(arr_api "$SONARR" "$SONARR_API_KEY" GET /api/v3/qualityprofile | jq -r '.[0].name')
   js_api POST /api/v1/settings/sonarr "$(jq -n \
-    --arg key "$SONARR_API_KEY" --argjson pid "$profile_id" --arg pname "$profile_name" \
+    --arg key "$SONARR_API_KEY" --argjson p "$SONARR_PROFILE" \
     '{name: "Sonarr", hostname: "sonarr", port: 8989, apiKey: $key, useSsl: false,
-      baseUrl: "", activeProfileId: $pid, activeProfileName: $pname,
+      baseUrl: "", activeProfileId: $p.id, activeProfileName: $p.name,
       activeDirectory: "/data/media/tv", activeAnimeDirectory: "",
       is4k: false, isDefault: true, syncEnabled: true, preventSearch: false,
       enableSeasonFolders: true, tags: [], animeTags: []}')"
 }
 ensure "Jellyseerr Sonarr server" js_has_sonarr -- js_add_sonarr
+ensure "Jellyseerr Sonarr quality profile '$(jq -r '.name' <<<"$SONARR_PROFILE")'" \
+  js_profile_ok sonarr "$(jq '.id' <<<"$SONARR_PROFILE")" -- js_set_profile sonarr "$SONARR_PROFILE"
 
 if ! js_initialized >/dev/null 2>&1; then
   js_api POST /api/v1/settings/initialize >/dev/null
