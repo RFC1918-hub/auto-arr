@@ -71,29 +71,35 @@ config/<app>/              # each app's config
 ## Running on Windows (WSL2)
 
 The stack runs unchanged inside a WSL2 Ubuntu distro with Docker Engine
-installed in it (systemd enabled in `/etc/wsl.conf`). Three Windows-side
+installed in it (systemd enabled in `/etc/wsl.conf`). Two Windows-side
 details make it behave like a server:
 
-- **LAN access.** WSL's default NAT networking exposes ports to the Windows
-  host only, through a loopback relay on `127.0.0.1:<port>`. Forward the
-  machine's LAN address to that relay and allow the ports through Windows
-  Firewall, once, from an elevated PowerShell:
+- **Stay up and be reachable.** WSL stops a distro about a minute after its
+  last session ends (even with systemd inside), and its default NAT networking
+  exposes ports to the Windows host only. `scripts/windows/wsl-keepalive.ps1`
+  handles both: it starts the distro, points Windows port proxies for the six
+  stack ports at the distro's current address, then holds a session open.
+  Install it once from an elevated PowerShell as a task that runs at startup
+  and at logon, whether or not anyone is logged on (the S4U logon type needs
+  no stored password):
 
   ```powershell
+  New-Item -ItemType Directory -Force C:\ProgramData\auto-arr | Out-Null
+  Copy-Item '\\wsl$\Ubuntu\opt\auto-arr\scripts\windows\wsl-keepalive.ps1' C:\ProgramData\auto-arr\
   foreach ($p in 8096,5055,9696,7878,8989,8080) {
-    netsh interface portproxy add v4tov4 listenport=$p listenaddress=0.0.0.0 connectport=$p connectaddress=127.0.0.1
     New-NetFirewallRule -Name "auto-arr-$p" -DisplayName "auto-arr $p" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow
   }
+  Register-ScheduledTask -TaskName 'auto-arr WSL keepalive' `
+    -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\ProgramData\auto-arr\wsl-keepalive.ps1') `
+    -Trigger @((New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)) `
+    -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest) `
+    -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1))
+  Start-ScheduledTask -TaskName 'auto-arr WSL keepalive'
   ```
 
-  The proxies persist across reboots and do not depend on WSL's internal IP.
-  (WSL's mirrored networking mode is the modern alternative, but in testing it
-  did not pass LAN traffic through to Docker-published ports.)
-- **Start on boot.** WSL does not start by itself. A Task Scheduler task that
-  runs `wsl.exe -d Ubuntu -u root --exec /bin/true` at logon boots the distro;
-  systemd then starts Docker and the containers (`restart: unless-stopped`).
-  For a headless reboot, set the task to run whether the user is logged on or
-  not, or enable automatic logon.
+  The script logs to `C:\ProgramData\auto-arr\keepalive.log`. (WSL's mirrored
+  networking mode would make the proxies unnecessary, but in testing it did
+  not pass LAN traffic through to Docker-published ports.)
 - **Disk.** Keep `DATA_ROOT` inside the WSL filesystem: hardlinks do not work
   on `/mnt/c`. The virtual disk grows on demand up to its limit (1 TB by
   default) and is bounded by free space on the Windows drive.
