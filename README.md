@@ -83,6 +83,15 @@ details make it behave like a server:
 - **Addresses.** Set `PUBLIC_HOST=<LAN address>` in `.env`. Inside WSL,
   `hostname -I` reports the NAT address, which the dashboard links and printed
   URLs would otherwise use.
+- **DNS.** WSL forwards DNS to the Windows resolver, and that path can stop
+  answering (seen with Tailscale's MagicDNS active on the host), which cuts the
+  containers off from indexers and metadata. If `getent hosts github.com`
+  fails inside WSL, add `[network]` / `generateResolvConf=false` to
+  `/etc/wsl.conf`, give systemd-resolved its own upstream servers
+  (`/etc/systemd/resolved.conf.d/dns.conf` with `[Resolve]` /
+  `DNS=1.1.1.1 8.8.8.8`, then `systemctl restart systemd-resolved`), restart
+  the distro once, and `docker compose restart` so running containers pick it
+  up. Docker follows systemd-resolved's upstream automatically.
 - **Stay up and be reachable.** WSL stops a distro about a minute after its
   last session ends (even with systemd inside), and its default NAT networking
   exposes ports to the Windows host only. `scripts/windows/wsl-keepalive.ps1`
