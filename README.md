@@ -30,8 +30,8 @@ with `sudo` as your normal user (not from a root shell) so media is owned by you
   Radarr/Sonarr then delete it and its files once imported. Library copies are
   hardlinks and are untouched.
 - Jellyfin → admin user created, Movies + Shows libraries added and scanned
-- Radarr/Sonarr → Jellyfin: the library is refreshed the moment something is
-  imported, upgraded, renamed or deleted (no waiting for a scheduled scan)
+- Radarr/Sonarr → Jellyfin: a webhook rescans the library the moment something
+  is imported, upgraded, renamed or deleted (no waiting for a scheduled scan)
 - Jellyseerr → connected to Jellyfin, Radarr and Sonarr
 - Homepage → one dashboard linking every service, with live status (queues,
   downloads, now playing, pending requests, disk usage)

@@ -385,26 +385,33 @@ JF_API_KEY=$(jf_api_key)
 log "Jellyfin API key for Radarr/Sonarr — ready"
 
 # ------------------------------------------- Radarr/Sonarr → Jellyfin refresh
-# Have each app tell Jellyfin to update its library the moment it imports,
+# Have each app tell Jellyfin to rescan its library the moment it imports,
 # upgrades, renames or deletes media. Jellyfin's real-time folder watching is
 # unreliable in Docker and its scheduled scan is hours apart, so without this
 # new media only appears after the next scan.
+# The apps' built-in Emby/Jellyfin connect still authenticates with the legacy
+# X-MediaBrowser-Token header, which Jellyfin 12 rejects (its connection test
+# passes only because it hits a public endpoint), so use a Webhook that POSTs
+# /Library/Refresh with the modern Authorization header instead.
 arr_has_jellyfin_connect() {
-  arr_api "$1" "$2" GET "/api/$3/notification" | jq -e '.[] | select(.name == "Jellyfin")'
+  arr_api "$1" "$2" GET "/api/$3/notification" \
+    | jq -e '.[] | select(.name == "Jellyfin" and .implementation == "Webhook")'
 }
 # arr_add_jellyfin_connect <base> <key> <api-ver> <event-flags-json>
 arr_add_jellyfin_connect() {
+  local old
+  # replace a connect of the old built-in kind if an earlier run created one
+  old=$(arr_api "$1" "$2" GET "/api/$3/notification" \
+    | jq -r '.[] | select(.name == "Jellyfin" and .implementation != "Webhook") | .id')
+  [[ -z "$old" ]] || arr_api "$1" "$2" DELETE "/api/$3/notification/$old" >/dev/null
   arr_api "$1" "$2" POST "/api/$3/notification" "$(arr_api "$1" "$2" GET "/api/$3/notification/schema" \
     | jq --arg k "$JF_API_KEY" --argjson ev "$4" '
-      [.[] | select(.implementation == "MediaBrowser")][0]
+      [.[] | select(.implementation == "Webhook")][0]
       | .name = "Jellyfin" | .tags = []
       | .fields |= map(
-          if   .name == "host"          then .value = "jellyfin"
-          elif .name == "port"          then .value = 8096
-          elif .name == "useSsl"        then .value = false
-          elif .name == "apiKey"        then .value = $k
-          elif .name == "notify"        then .value = false
-          elif .name == "updateLibrary" then .value = true
+          if   .name == "url"     then .value = "http://jellyfin:8096/Library/Refresh"
+          elif .name == "method"  then .value = 1
+          elif .name == "headers" then .value = [{key: "Authorization", value: ("MediaBrowser Token=\"" + $k + "\"")}]
           else . end)
       | . + $ev')"
 }
