@@ -12,9 +12,12 @@ x-common-env: &common-env
   PGID: ${PGID}
   TZ: ${TZ}
 
+# Images are pinned to the versions this stack was verified with, so an upstream
+# release cannot change behaviour underneath you (Jellyfin 12 did exactly that).
+# To update: bump the tags below, then re-run ./setup.sh (pulls and re-wires).
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:version-5.2.3_v2.0.14
     container_name: qbittorrent
     environment:
       <<: *common-env
@@ -28,7 +31,7 @@ services:
     restart: unless-stopped
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
+    image: lscr.io/linuxserver/prowlarr:version-2.5.2.5491
     container_name: prowlarr
     environment:
       <<: *common-env
@@ -42,7 +45,7 @@ services:
     restart: unless-stopped
 
   radarr:
-    image: lscr.io/linuxserver/radarr:latest
+    image: lscr.io/linuxserver/radarr:version-6.3.0.10514
     container_name: radarr
     environment:
       <<: *common-env
@@ -57,7 +60,7 @@ services:
     restart: unless-stopped
 
   sonarr:
-    image: lscr.io/linuxserver/sonarr:latest
+    image: lscr.io/linuxserver/sonarr:version-4.0.19.2979
     container_name: sonarr
     environment:
       <<: *common-env
@@ -72,7 +75,7 @@ services:
     restart: unless-stopped
 
   jellyfin:
-    image: lscr.io/linuxserver/jellyfin:latest
+    image: lscr.io/linuxserver/jellyfin:version-12.0ubu2604
     container_name: jellyfin
     environment:
       <<: *common-env
@@ -88,7 +91,7 @@ services:
     # Jellyseerr was renamed Seerr. fallenbagel/jellyseerr:latest is frozen at
     # 2.7.3 (Aug 2025), which still talks to Jellyfin with the legacy
     # X-Emby-Authorization header that Jellyfin 12 rejects by default.
-    image: seerr/seerr:latest
+    image: seerr/seerr:v3.4.1
     container_name: jellyseerr
     init: true               # the Seerr image ships no init process
     user: "${PUID}:${PGID}"  # image defaults to UID 1000; match the stack so /app/config is writable
@@ -106,7 +109,7 @@ services:
     # with "blocked by CloudFlare Protection" (e.g. 1337x). Internal only:
     # Prowlarr reaches it on the compose network, and only routes indexers
     # tagged 'flaresolverr' through it (see README).
-    image: ghcr.io/flaresolverr/flaresolverr:latest
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.0
     container_name: flaresolverr
     environment:
       TZ: ${TZ}

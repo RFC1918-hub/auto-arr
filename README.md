@@ -15,7 +15,8 @@ git clone <this-repo> && cd auto-arr
 That's it. When the script finishes it prints each service's URL.
 Logins are in `credentials.txt` (git-ignored, generated on first run).
 
-**Requirements:** Linux, Docker Engine + compose plugin. Nothing else.
+**Requirements:** Linux, Docker Engine + compose plugin. Nothing else. Run it
+with `sudo` as your normal user (not from a root shell) so media is owned by you.
 
 ## What gets wired
 
@@ -59,3 +60,32 @@ config/<app>/              # each app's config
   (0 disables one), then re-run `./setup.sh`.
 - **Logs:** `docker logs <service>`; wiring log: `docker logs arr-bootstrap`.
 - **Uninstall:** `docker compose down` (add `-v` plus delete `config/` and `data/` for a full wipe).
+- **Update apps:** images are pinned to verified versions. Bump the tags in
+  `docker-compose.yml`, then re-run `./setup.sh`.
+- **Backups:** `scripts/backup.sh` archives `config/`, `.env` and
+  `credentials.txt` into `backups/` and keeps the last 7. Nightly:
+  `30 4 * * * /opt/auto-arr/scripts/backup.sh`.
+- **Remote access:** keep the ports LAN-only. For access from outside, run
+  Tailscale or WireGuard on the host rather than port-forwarding on the router.
+
+## Running on Windows (WSL2)
+
+The stack runs unchanged inside a WSL2 Ubuntu distro with Docker Engine
+installed in it (systemd enabled in `/etc/wsl.conf`). Three Windows-side
+details make it behave like a server:
+
+- **LAN access.** WSL's default NAT networking exposes ports to the Windows
+  host only. Switch to mirrored networking so TVs and phones can reach
+  Jellyfin: create `%USERPROFILE%\.wslconfig` containing `[wsl2]` and
+  `networkingMode=mirrored`, allow the ports through the Hyper-V firewall
+  (`New-NetFirewallHyperVRule -Direction Inbound -Protocol TCP -LocalPorts 8096`
+  and so on, with `-VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'`),
+  then run `wsl --shutdown` once.
+- **Start on boot.** WSL does not start by itself. A Task Scheduler task that
+  runs `wsl.exe -d Ubuntu -u root --exec /bin/true` at logon boots the distro;
+  systemd then starts Docker and the containers (`restart: unless-stopped`).
+  For a headless reboot, set the task to run whether the user is logged on or
+  not, or enable automatic logon.
+- **Disk.** Keep `DATA_ROOT` inside the WSL filesystem: hardlinks do not work
+  on `/mnt/c`. The virtual disk grows on demand up to its limit (1 TB by
+  default) and is bounded by free space on the Windows drive.

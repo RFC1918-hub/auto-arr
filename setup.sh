@@ -25,7 +25,10 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   TZ_DETECTED=$( { cat /etc/timezone 2>/dev/null || timedatectl show -p Timezone --value 2>/dev/null; } | head -n1 )
   [[ -n "${TZ_DETECTED:-}" ]] && sed -i "s|^TZ=.*|TZ=${TZ_DETECTED}|" .env
-  sed -i "s|^PUID=.*|PUID=$(id -u)|; s|^PGID=.*|PGID=$(id -g)|" .env
+  # Use the invoking user's ids even under sudo, so media is not owned by root.
+  RUN_UID=${SUDO_UID:-$(id -u)}; RUN_GID=${SUDO_GID:-$(id -g)}
+  sed -i "s|^PUID=.*|PUID=${RUN_UID}|; s|^PGID=.*|PGID=${RUN_GID}|" .env
+  [[ "$RUN_UID" != 0 ]] || say "WARNING: running as root — containers will run as root too. Set PUID/PGID in .env to your user's ids (id -u / id -g) and re-run."
   sed -i "s|^RADARR_API_KEY=.*|RADARR_API_KEY=$(rand_hex 16)|" .env
   sed -i "s|^SONARR_API_KEY=.*|SONARR_API_KEY=$(rand_hex 16)|" .env
   sed -i "s|^PROWLARR_API_KEY=.*|PROWLARR_API_KEY=$(rand_hex 16)|" .env
@@ -80,6 +83,19 @@ WebUI\Username=admin
 WebUI\AuthSubnetWhitelistEnabled=true
 WebUI\AuthSubnetWhitelist=172.28.0.0/16
 EOF
+fi
+
+# ---------- ownership ----------
+# Containers run as PUID:PGID, so the tree must belong to them. Only when
+# running as root and the tree is owned by someone else (fresh install, or
+# PUID/PGID changed in .env); a no-op on later runs.
+if [[ $(id -u) == 0 && "${PUID}" != 0 ]]; then
+  for d in "${DATA_ROOT}" "${CONFIG_ROOT}"; do
+    if [[ $(stat -c %u "$d") != "${PUID}" ]]; then
+      say "Setting ownership of ${d} to ${PUID}:${PGID}"
+      chown -R "${PUID}:${PGID}" "$d"
+    fi
+  done
 fi
 
 # ---------- launch ----------
