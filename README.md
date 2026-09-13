@@ -1,9 +1,9 @@
 # auto-arr
 
 One command installs and wires a complete media-automation stack on any Linux
-server with Docker: **Prowlarr (+ FlareSolverr), Radarr, Sonarr, Seerr (formerly
-Jellyseerr), Jellyfin and qBittorrent** — APIs connected, folders created,
-libraries scanned.
+server with Docker: **Homepage (dashboard), Prowlarr (+ FlareSolverr), Radarr,
+Sonarr, Seerr (formerly Jellyseerr), Jellyfin and qBittorrent** — APIs
+connected, folders created, libraries scanned.
 
 ## Quick start
 
@@ -33,6 +33,11 @@ with `sudo` as your normal user (not from a root shell) so media is owned by you
 - Radarr/Sonarr → Jellyfin: the library is refreshed the moment something is
   imported, upgraded, renamed or deleted (no waiting for a scheduled scan)
 - Jellyseerr → connected to Jellyfin, Radarr and Sonarr
+- Homepage → one dashboard linking every service, with live status (queues,
+  downloads, now playing, pending requests, disk usage)
+- Logins: Radarr, Sonarr, Prowlarr and qBittorrent skip the password for
+  private (LAN) addresses (`LAN_LOGIN=skip`; set `require` to always ask).
+  Jellyfin and Seerr remember each device after the first sign-in.
 - Folder layout follows the TRaSH-guides single-volume convention, so
   completed downloads are **hardlinked** into the library (no copy, no
   double disk usage):
@@ -46,10 +51,11 @@ config/<app>/              # each app's config
 
 ## After install
 
-1. Open Prowlarr and add your indexers — that's the only manual step. If one
+1. Open the dashboard at `http://<host>:3000` — everything is linked from there.
+2. Open Prowlarr and add your indexers — that's the only manual step. If one
    fails with *blocked by CloudFlare Protection* (1337x, for example), add the
    `flaresolverr` tag to that indexer so Prowlarr routes it through FlareSolverr.
-2. Request something in Jellyseerr and watch it flow through.
+3. Request something in Seerr and watch it flow through.
 
 ## Operations
 
@@ -71,9 +77,12 @@ config/<app>/              # each app's config
 ## Running on Windows (WSL2)
 
 The stack runs unchanged inside a WSL2 Ubuntu distro with Docker Engine
-installed in it (systemd enabled in `/etc/wsl.conf`). Two Windows-side
+installed in it (systemd enabled in `/etc/wsl.conf`). Three Windows-side
 details make it behave like a server:
 
+- **Addresses.** Set `PUBLIC_HOST=<LAN address>` in `.env`. Inside WSL,
+  `hostname -I` reports the NAT address, which the dashboard links and printed
+  URLs would otherwise use.
 - **Stay up and be reachable.** WSL stops a distro about a minute after its
   last session ends (even with systemd inside), and its default NAT networking
   exposes ports to the Windows host only. `scripts/windows/wsl-keepalive.ps1`
@@ -86,7 +95,7 @@ details make it behave like a server:
   ```powershell
   New-Item -ItemType Directory -Force C:\ProgramData\auto-arr | Out-Null
   Copy-Item '\\wsl$\Ubuntu\opt\auto-arr\scripts\windows\wsl-keepalive.ps1' C:\ProgramData\auto-arr\
-  foreach ($p in 8096,5055,9696,7878,8989,8080) {
+  foreach ($p in 3000,8096,5055,9696,7878,8989,8080) {
     New-NetFirewallRule -Name "auto-arr-$p" -DisplayName "auto-arr $p" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow
   }
   Register-ScheduledTask -TaskName 'auto-arr WSL keepalive' `

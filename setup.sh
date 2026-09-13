@@ -19,7 +19,7 @@ port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 # ---------- .env generation (first run only) ----------
 if [[ ! -f .env ]]; then
   say "Generating .env with fresh secrets"
-  for port in 8080 9696 7878 8989 8096 5055; do
+  for port in 3000 8080 9696 7878 8989 8096 5055; do
     port_free "$port" || die "port $port is already in use — free it or edit the *_PORT values in .env.example before first run"
   done
   cp .env.example .env
@@ -60,12 +60,15 @@ chmod 600 credentials.txt
 
 # ---------- folders ----------
 say "Creating folder tree under ${DATA_ROOT} and ${CONFIG_ROOT}"
-mkdir -p \
-  "${DATA_ROOT}/torrents/movies" "${DATA_ROOT}/torrents/tv" \
-  "${DATA_ROOT}/media/movies"    "${DATA_ROOT}/media/tv" \
-  "${CONFIG_ROOT}/qbittorrent"   "${CONFIG_ROOT}/prowlarr" \
-  "${CONFIG_ROOT}/radarr"        "${CONFIG_ROOT}/sonarr" \
+APP_DIRS=(
+  "${DATA_ROOT}/torrents/movies" "${DATA_ROOT}/torrents/tv"
+  "${DATA_ROOT}/media/movies"    "${DATA_ROOT}/media/tv"
+  "${CONFIG_ROOT}/qbittorrent"   "${CONFIG_ROOT}/prowlarr"
+  "${CONFIG_ROOT}/radarr"        "${CONFIG_ROOT}/sonarr"
   "${CONFIG_ROOT}/jellyfin"      "${CONFIG_ROOT}/jellyseerr"
+  "${CONFIG_ROOT}/homepage"
+)
+mkdir -p "${APP_DIRS[@]}"
 
 # ---------- qBittorrent pre-seed ----------
 # Whitelist the compose subnet so bootstrap (and Radarr/Sonarr) can use the
@@ -96,7 +99,17 @@ if [[ $(id -u) == 0 && "${PUID}" != 0 ]]; then
       chown -R "${PUID}:${PGID}" "$d"
     fi
   done
+  chown "${PUID}:${PGID}" "${APP_DIRS[@]}"   # folders created above by root; cheap, non-recursive
 fi
+
+# ---------- addresses ----------
+# PUBLIC_HOST is how browsers reach this machine (dashboard links, printed URLs,
+# Homepage's allowed hosts). Auto-detected when blank; set it in .env when the
+# first IP is not the LAN one (WSL reports its NAT address, for example).
+export PUBLIC_HOST=${PUBLIC_HOST:-$(hostname -I 2>/dev/null | awk '{print $1}')}
+export PUBLIC_HOST=${PUBLIC_HOST:-localhost}
+export HOMEPAGE_PORT=${HOMEPAGE_PORT:-3000}
+export HOMEPAGE_ALLOWED_HOSTS=${HOMEPAGE_ALLOWED_HOSTS:-"${PUBLIC_HOST}:${HOMEPAGE_PORT},localhost:${HOMEPAGE_PORT},127.0.0.1:${HOMEPAGE_PORT}"}
 
 # ---------- launch ----------
 say "Starting stack (first run pulls images — may take a few minutes)"
@@ -111,17 +124,16 @@ wait "$LOGS_PID" 2>/dev/null || true
 
 [[ "$BOOT_EXIT" == "0" ]] || die "bootstrap failed (exit $BOOT_EXIT). Inspect: docker logs arr-bootstrap — then re-run ./setup.sh to resume."
 
-HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-HOST_IP=${HOST_IP:-localhost}
 say "All wired up. Services:"
 cat <<EOF
-  Jellyfin    http://${HOST_IP}:${JELLYFIN_PORT}
-  Jellyseerr  http://${HOST_IP}:${JELLYSEERR_PORT}
-  Radarr      http://${HOST_IP}:${RADARR_PORT}
-  Sonarr      http://${HOST_IP}:${SONARR_PORT}
-  Prowlarr    http://${HOST_IP}:${PROWLARR_PORT}
-  qBittorrent http://${HOST_IP}:${QBIT_PORT}
+  Homepage    http://${PUBLIC_HOST}:${HOMEPAGE_PORT}   (start here — links to everything)
+  Jellyfin    http://${PUBLIC_HOST}:${JELLYFIN_PORT}
+  Jellyseerr  http://${PUBLIC_HOST}:${JELLYSEERR_PORT}
+  Radarr      http://${PUBLIC_HOST}:${RADARR_PORT}
+  Sonarr      http://${PUBLIC_HOST}:${SONARR_PORT}
+  Prowlarr    http://${PUBLIC_HOST}:${PROWLARR_PORT}
+  qBittorrent http://${PUBLIC_HOST}:${QBIT_PORT}
 
-  Logins: see ./credentials.txt
+  Logins: see ./credentials.txt$( [[ "${LAN_LOGIN:-skip}" == "skip" ]] && echo " (not asked for on the LAN: LAN_LOGIN=skip)" )
   Next step: open Prowlarr and add your indexers — they sync to Radarr/Sonarr automatically.
 EOF

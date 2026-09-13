@@ -12,7 +12,7 @@
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\ProgramData\auto-arr\wsl-keepalive.ps1
 param(
   [string]$Distro = 'Ubuntu',
-  [int[]]$Ports = @(8096, 5055, 9696, 7878, 8989, 8080),
+  [int[]]$Ports = @(3000, 8096, 5055, 9696, 7878, 8989, 8080),
   [string]$LogFile = 'C:\ProgramData\auto-arr\keepalive.log'
 )
 $ErrorActionPreference = 'Continue'

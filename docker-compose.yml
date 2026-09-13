@@ -116,6 +116,22 @@ services:
     networks: [arr]
     restart: unless-stopped
 
+  homepage:
+    # One dashboard for everything. Its config is written by the bootstrap
+    # (which holds all the API keys); Homepage reloads it on change.
+    image: ghcr.io/gethomepage/homepage:v2.3.0
+    container_name: homepage
+    environment:
+      <<: *common-env
+      HOMEPAGE_ALLOWED_HOSTS: ${HOMEPAGE_ALLOWED_HOSTS:-*}
+    volumes:
+      - ${CONFIG_ROOT}/homepage:/app/config
+      - ${DATA_ROOT}:/data:ro
+    ports:
+      - "${HOMEPAGE_PORT:-3000}:3000"
+    networks: [arr]
+    restart: unless-stopped
+
   bootstrap:
     image: alpine:3.20
     container_name: arr-bootstrap
@@ -127,6 +143,7 @@ services:
       - jellyfin
       - jellyseerr
       - flaresolverr
+      - homepage
     environment:
       RADARR_API_KEY: ${RADARR_API_KEY}
       SONARR_API_KEY: ${SONARR_API_KEY}
@@ -139,8 +156,20 @@ services:
       JELLYFIN_ADMIN_PASSWORD: ${JELLYFIN_ADMIN_PASSWORD}
       SEED_RATIO: ${SEED_RATIO:-1.0}
       SEED_TIME_MINUTES: ${SEED_TIME_MINUTES:-1440}
+      LAN_LOGIN: ${LAN_LOGIN:-skip}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      HOMEPAGE_PORT: ${HOMEPAGE_PORT:-3000}
+      JELLYFIN_PORT: ${JELLYFIN_PORT}
+      JELLYSEERR_PORT: ${JELLYSEERR_PORT}
+      RADARR_PORT: ${RADARR_PORT}
+      SONARR_PORT: ${SONARR_PORT}
+      PROWLARR_PORT: ${PROWLARR_PORT}
+      QBIT_PORT: ${QBIT_PORT}
+      PUID: ${PUID}
+      PGID: ${PGID}
     volumes:
       - ./bootstrap:/bootstrap:ro
+      - ${CONFIG_ROOT}/homepage:/homepage
     networks: [arr]
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "apk add --no-cache bash curl jq >/dev/null && exec bash /bootstrap/bootstrap.sh"]
