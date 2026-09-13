@@ -540,6 +540,7 @@ cat > "$HP_DIR/services.yaml" <<EOF
           type: jellyfin
           url: http://jellyfin:8096
           key: "${JF_API_KEY}"
+          version: 2            # Jellyfin 12+: modern paths and Authorization header
           enableBlocks: true
           enableNowPlaying: true
     - Seerr:
