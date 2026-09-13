@@ -75,12 +75,20 @@ installed in it (systemd enabled in `/etc/wsl.conf`). Three Windows-side
 details make it behave like a server:
 
 - **LAN access.** WSL's default NAT networking exposes ports to the Windows
-  host only. Switch to mirrored networking so TVs and phones can reach
-  Jellyfin: create `%USERPROFILE%\.wslconfig` containing `[wsl2]` and
-  `networkingMode=mirrored`, allow the ports through the Hyper-V firewall
-  (`New-NetFirewallHyperVRule -Direction Inbound -Protocol TCP -LocalPorts 8096`
-  and so on, with `-VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'`),
-  then run `wsl --shutdown` once.
+  host only, through a loopback relay on `127.0.0.1:<port>`. Forward the
+  machine's LAN address to that relay and allow the ports through Windows
+  Firewall, once, from an elevated PowerShell:
+
+  ```powershell
+  foreach ($p in 8096,5055,9696,7878,8989,8080) {
+    netsh interface portproxy add v4tov4 listenport=$p listenaddress=0.0.0.0 connectport=$p connectaddress=127.0.0.1
+    New-NetFirewallRule -Name "auto-arr-$p" -DisplayName "auto-arr $p" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow
+  }
+  ```
+
+  The proxies persist across reboots and do not depend on WSL's internal IP.
+  (WSL's mirrored networking mode is the modern alternative, but in testing it
+  did not pass LAN traffic through to Docker-published ports.)
 - **Start on boot.** WSL does not start by itself. A Task Scheduler task that
   runs `wsl.exe -d Ubuntu -u root --exec /bin/true` at logon boots the distro;
   systemd then starts Docker and the containers (`restart: unless-stopped`).
