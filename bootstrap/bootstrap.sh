@@ -476,8 +476,9 @@ js_profile_ok() { js_api GET "/api/v1/settings/$1" | jq -e --argjson p "$2" '.[0
 js_set_profile() {
   local cur
   cur=$(js_api GET "/api/v1/settings/$1" | jq -c '.[0]')
+  # Seerr rejects the read-only id in the body ("request/body/id is read-only")
   js_api PUT "/api/v1/settings/$1/$(jq -r '.id' <<<"$cur")" \
-    "$(jq --argjson p "$2" '.activeProfileId = $p.id | .activeProfileName = $p.name' <<<"$cur")"
+    "$(jq --argjson p "$2" 'del(.id) | .activeProfileId = $p.id | .activeProfileName = $p.name' <<<"$cur")"
 }
 
 RADARR_PROFILE=$(arr_profile "$RADARR" "$RADARR_API_KEY")
