@@ -16,6 +16,15 @@ x-common-env: &common-env
 # release cannot change behaviour underneath you (Jellyfin 12 did exactly that).
 # To update: bump the tags below, then re-run ./setup.sh (pulls and re-wires).
 services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.4
+    container_name: arr-cloudflared
+    profiles: [tunnel]
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
+    secrets: [cloudflare_tunnel_token]
+    networks: [arr]
+    restart: unless-stopped
+
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:version-5.2.3_v2.0.14
     container_name: qbittorrent
@@ -175,3 +184,7 @@ services:
     restart: "no"
     # apk fetch can hit a transient DNS/network blip right after a restart; retry.
     entrypoint: ["/bin/sh", "-c", "for i in 1 2 3 4 5 6; do apk add --no-cache bash curl jq >/dev/null && break; echo \"apk fetch failed (attempt $i), retrying...\"; sleep 10; done; exec bash /bootstrap/bootstrap.sh"]
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ${CONFIG_ROOT}/cloudflared/token
