@@ -570,7 +570,7 @@ cat > "$HP_DIR/services.yaml" <<EOF
           enableNowPlaying: true
     - Seerr:
         icon: seerr.png
-        href: http://${PH}:${JELLYSEERR_PORT}
+        href: ${SEERR_PUBLIC_URL:-http://${PH}:${JELLYSEERR_PORT}}
         description: Request movies and shows
         widget:
           type: jellyseerr
